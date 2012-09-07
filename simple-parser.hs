@@ -2,6 +2,7 @@ module Main where
 import System.Environment  
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad
+import Numeric
 
 main :: IO ()
 main = do args <- getArgs
@@ -13,30 +14,65 @@ readExpr input = case parse parseExpr "lisp" input of
     Right val -> "Found value"
 
 parseExpr :: Parser LispVal
-parseExpr = parseAtom <|> parseString <|> parseNumber 
-
-parseString :: Parser LispVal
-parseString = do char '"'
-                 x <- many (noneOf "\"")
-                 char '"'
-                 return $ String x 
+parseExpr = parseAtom 
+        <|> parseString 
+        <|> parseNumber
+        <|> parseBool 
 
 parseAtom :: Parser LispVal
 parseAtom = do first <- letter <|> symbol
                rest <- many (letter <|> digit <|> symbol)
                let atom = first:rest
-               return $ case atom of
-                 "#t" -> Bool True
-                 "#f" -> Bool False
-                 _    -> Atom atom
+               return $ Atom atom
+               
+parseString :: Parser LispVal
+parseString = do char '"'
+                 x <- many $ escapedChars <|> noneOf "\"\\"
+                 char '"'
+                 return $ String x 
+                              
+parseBool :: Parser LispVal
+parseBool = do x <- string "#" >> oneOf "tf" 
+               return $ case x of
+                 't' -> Bool True
+                 'f' -> Bool False
 
 parseNumber :: Parser LispVal
-parseNumber = liftM (Number . read) $ many1 digit
--- 練習2.1.1 do記法
---parseNumber = do digits <- many1 digit
---                 return . Number $ read digits
--- 練習2.1.2 >>=演算子を使った明示的なシーケンシング
---parseNumber = many1 digit >>= return . Number . read 
+parseNumber = do num <- parseDecimal <|> parseDecimal' <|> parseBinary <|> parseOct <|> parseHex
+                 return $ num
+
+parseDecimal :: Parser LispVal
+parseDecimal = do x <- many1 digit
+                  (return . Number . read) x
+
+parseDecimal' :: Parser LispVal
+parseDecimal' = do try $ string "#d"
+                   x <- many1 digit
+                   (return . Number . read) x
+                   
+parseBinary :: Parser LispVal
+parseBinary = do try $ string "#b"
+                 x <- many1 (oneOf "01")
+                 return $ Number (bin2int x)
+                 
+parseOct :: Parser LispVal
+parseOct = do try $ string "#o"
+              x <- many1 octDigit
+              return $ Number (oct2int x)
+
+parseHex :: Parser LispVal
+parseHex = do try $ string "#x"
+              x <- many1 hexDigit
+              return $ Number (hex2int x)
+
+bin2int :: String -> Integer
+bin2int = bin2int' 0
+bin2int' intVal [] = intVal
+bin2int' intVal (x:xs) = let old = 2 * intVal + (if x == '0' then 0 else 1) in bin2int' old xs
+
+oct2int x = fst $ readOct x !! 0
+
+hex2int x = fst $ readHex x !! 0
 
 data LispVal = Atom String 
              | List [LispVal]
@@ -46,7 +82,15 @@ data LispVal = Atom String
              | Bool Bool    
 
 symbol :: Parser Char
-symbol = oneOf "!#$%&|*+-/:<=>?@^_~"
+symbol = oneOf "!$%&|*+-/:<=>?@^_~"
 
 spaces :: Parser ()
 spaces = skipMany1 space
+
+escapedChars :: Parser Char
+escapedChars = do x <- char '\\' >> oneOf "\\\"nrt"
+                  return $ case x of 
+                    'n' -> '\n'
+                    'r' -> '\r'
+                    't' -> '\t'
+                    _ -> x
